@@ -1,0 +1,152 @@
+**This file includes the advanced analytics performed on the Library data**
+---------------------------------------------------------------------------------
+-- Identify members with overdue books.
+-- Write a query to identify members who have overdue books (assume a 30 days return period). Display the member_id, member name, book_title, issue_date and days overdue 
+select member_id, member_name, book_title, issued_date, days_overdue 
+from 
+(
+select i.issued_member_id as member_id, m.member_name, i.issued_book_name as book_title, i.issued_date, r.return_date,  current_date- i.issued_date as days_overdue
+from issued_status as i 
+left join return_status as r 
+on i.issued_id = r.issued_id
+left join members as m 
+on m.member_id = i.issued_member_id
+) t
+where return_date is null and days_overdue >30
+
+-- Update Book status on Return
+-- Write a query to update the status of a book in the book table to "Yes" when they are returned (based on entries in the return_status table).
+-- Store procedures 
+create or replace procedure add_return_records (p_return_id varchar (10), p_issued_id varchar (10) , p_quality varchar (15))
+language plpgsql 
+as $$ 
+declare v_isbn varchar(20); 
+		v_book_name varchar(75); 
+begin 
+		insert into return_status(return_id,issued_id,return_date,book_quality)
+		values (p_return_id, p_issued_id, current_date, p_quality);
+
+	select issued_book_isbn, issued_book_name
+	into v_isbn, v_book_name
+	from issued_status
+	where issued_id = p_issued_id ; 
+		update books 
+		set status = 'yes'
+		where isbn = v_isbn; 
+	raise notice 'Thank you for returning the book:%', v_book_name; 
+end; 
+$$
+-- Testing stored procedure 
+
+--issued_id = IS135
+--isbn = '978-0-307-58837-1'
+
+select * from books
+where isbn = '978-0-307-58837-1'
+
+select * from issued_status 
+where issued_id= 'IS135'
+
+select * from return_status 
+where issued_book_isbn = '978-0-307-58837-1'
+
+call add_return_records('RS138','IS135','Good'); 
+select * from return_status
+
+
+-- Branch Performance Report
+-- Create a query that generates a performance report for each branch, showing the number of books issued, the number of books returned and the total revenue generated from book rentals 
+
+select * from branch
+select * from books
+select * from issued_status
+select * from return_status 
+select * from employees
+
+
+create table branch_performance_report 
+as
+select b.branch_id, b.manager_id, sum(bk.rental_price) as revenue, count(i.issued_id) as nr_of_issued_books, count(r.return_id) as nr_of_returned_books 
+from issued_status as i 
+join employees as e 
+on i.issued_emp_id = e.emp_id
+join branch as b 
+on e.branch_id = b.branch_id
+left join return_status as r 
+on r.issued_id = i.issued_id
+join books as bk 
+on bk.isbn = i.issued_book_isbn
+group by 1,2 
+
+
+--Create a table for active members
+--USe CTAS statement to create a new table 'active_members' containing members who have issued atleat one book in last 12 months 
+create table active_members 
+as
+select * from members 
+where member_id in (
+					select distinct issued_member_id
+					from issued_status 
+					where issued_date >= current_date -interval '12 months'
+					);
+			
+select* from active_members
+
+-- Find Employees with the most book issues processed. 
+-- Write a query to find the top 3 employees who have processed the most book issues. Display the employee_name, number of books processed and their branch
+select e.emp_name as employee_name, b.*, count(issued_id) as number_of_books_Issued 
+from issued_status as i 
+join employees as e 
+on i.issued_emp_id = e.emp_id
+join branch as b 
+on e.branch_id = b.branch_id 
+group by 1,2
+
+
+
+/*Task 19: Stored Procedure Objective: Create a stored procedure to manage the status of books in a library system.
+Description: Write a stored procedure that updates the status of a book in the library based on its issuance. The procedure should function as follows: The stored procedure should take the book_id as an input parameter. The 
+procedure should first check if the book is available (status = 'yes'). If the book is available, it should be issued,and the status in the books table should be updated to 'no'. If the book is not available (status = 'no'), the
+procedure should return an error message indicating that the book is currently not available.*/ 
+
+
+select * from books 
+select * from issued_status 
+
+create or replace procedure issue_book(p_issued_id varchar(10), p_issued_member_id varchar (10), p_issued_book_isbn varchar(20), p_issued_emp_id varchar(15))
+language plpgsql
+as $$ 
+declare v_status varchar(40); 
+begin 
+	--check if book is available 'yes'
+	select 
+		status 
+	into 
+		v_status 
+	from books 
+	where isbn =p_issued_book_isbn; 
+
+	if 
+		v_status ='yes'
+	then 
+		insert into issued_status (issued_id, issued_member_id, issued_date, issued_book_isbn, issued_emp_id)
+		values (p_issued_id, p_issued_member_id,current_date, p_issued_book_isbn, p_issued_emp_id); 
+		update books 
+		set status ='No'
+		where isbn = p_issued_book_isbn; 
+		raise notice 'Book record added successfully for book isbn:%', p_issued_book_isbn;
+	else 
+		raise notice 'Book is not available, isbn:%', p_issued_book_isbn;
+	end if; 
+end; 
+$$
+
+-- Testing the stored procedure 
+
+--978-0-375-41398-8-- no 
+--978-0-553-29698-2-- yes 
+call issue_book('IS155', 'C108', '978-0-553-29698-2','E104')
+
+
+select * from books
+where isbn= '978-0-553-29698-2'
